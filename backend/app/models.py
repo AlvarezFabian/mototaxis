@@ -19,6 +19,7 @@ class Driver(Base):
     __tablename__ = "Drivers"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("Users.id"), nullable=True, index=True)
     name = Column(Unicode(100), nullable=False)
     phone = Column(String(20), nullable=False)
     vehicle = Column(String(20), nullable=False)
@@ -26,6 +27,7 @@ class Driver(Base):
     plate = Column(String(15), nullable=False)
     base_barrio = Column(Unicode(100), nullable=False)
     status = Column(String(20), default="disponible")
+    is_online = Column(Boolean, default=True, nullable=False)
     rating = Column(Float, default=5.0)
     trips_count = Column(Integer, default=0)
     intermunicipal = Column(Boolean, default=False)

@@ -20,7 +20,15 @@ export function AppProvider({ children }) {
   // Controla si la pantalla de edicion de perfil esta visible
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  const [driverOnline, setDriverOnline] = useState(true);
+  // Recupera el estado de disponibilidad guardado en la sesion local al iniciar
+  const [driverOnline, setDriverOnline] = useState(() => {
+    const savedUser = localStorage.getItem('motored_user');
+    if (!savedUser) return true;
+    const parsedUser = JSON.parse(savedUser);
+    return parsedUser.isOnline ?? true;
+  });
+  const [isUpdatingDriverStatus, setIsUpdatingDriverStatus] = useState(false);
+
   const currentDriver = {
     name: currentUser?.fullName || 'Conductor',
     plate: currentUser?.plate || 'SIN-PLACA',
@@ -51,6 +59,9 @@ export function AppProvider({ children }) {
     localStorage.setItem('motored_user', JSON.stringify(user));
     setAuthToken(token);
     setCurrentUser(user);
+    if (user.role === 'driver' && typeof user.isOnline === 'boolean') {
+      setDriverOnline(user.isOnline);
+    }
   };
 
   const logoutUser = () => {
@@ -141,6 +152,26 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Consulta el perfil actualizado en el servidor para sincronizar datos al recargar
+  const syncAuthenticatedUser = async () => {
+    if (!authToken) return;
+    try {
+      const response = await fetch(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!response.ok) return;
+
+      const freshUser = await response.json();
+      localStorage.setItem('motored_user', JSON.stringify(freshUser));
+      setCurrentUser(freshUser);
+      if (freshUser.role === 'driver' && typeof freshUser.isOnline === 'boolean') {
+        setDriverOnline(freshUser.isOnline);
+      }
+    } catch (error) {
+      console.error('Error sincronizando sesion del usuario:', error);
+    }
+  };
+
   const fetchAllData = async () => {
     try {
       setLoading(true);
@@ -165,25 +196,69 @@ export function AppProvider({ children }) {
   };
 
   useEffect(() => {
-    if (currentUser) {
+    if (authToken) {
+      syncAuthenticatedUser();
       fetchAllData();
     }
-  }, [currentUser]);
+  }, [authToken]);
 
   const switchView = () => {
     showToast('Tu vista esta asignada segun el rol de tu cuenta.');
   };
 
-  const toggleDriverStatus = () => {
-    setDriverOnline((prev) => {
-      const next = !prev;
+  const toggleDriverStatus = async () => {
+    // Evita peticiones duplicadas si ya hay un cambio de estado en curso
+    if (!authToken || currentUser?.role !== 'driver' || isUpdatingDriverStatus) {
+      return;
+    }
+
+    const nextStatus = !driverOnline;
+    setIsUpdatingDriverStatus(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/drivers/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ isOnline: nextStatus }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        showToast(data.detail || 'No se pudo actualizar el estado de disponibilidad.');
+        return;
+      }
+
+      // Actualiza el estado local, la sesion guardada y el listado de conductores
+      setDriverOnline(data.isOnline);
+
+      if (currentUser) {
+        const updatedUser = { ...currentUser, isOnline: data.isOnline };
+        localStorage.setItem('motored_user', JSON.stringify(updatedUser));
+        setCurrentUser(updatedUser);
+      }
+
+      setDrivers((prev) =>
+        prev.map((driver) =>
+          driver.id === data.driverId
+            ? { ...driver, isOnline: data.isOnline, status: data.status }
+            : driver
+        )
+      );
+
       showToast(
-        next
+        data.isOnline
           ? 'Ahora estas marcado como Disponible para recibir carreras.'
           : 'Estado cambiado a Fuera de servicio.'
       );
-      return next;
-    });
+    } catch (error) {
+      console.error('Error actualizando disponibilidad:', error);
+      showToast('Error de conexion al cambiar tu disponibilidad.');
+    } finally {
+      setIsUpdatingDriverStatus(false);
+    }
   };
 
   const openOrderModal = (presetService = 'Carrera urbana', directDriver = null) => {
@@ -333,6 +408,7 @@ export function AppProvider({ children }) {
         fetchAllData,
         openOrdersCount,
         driverOnline,
+        isUpdatingDriverStatus,
         toggleDriverStatus,
         currentDriver,
         isOrderModalOpen,

@@ -21,6 +21,7 @@ class DriverCreate(DriverBase):
 class DriverResponse(DriverBase):
     id: int
     status: str = "disponible"
+    isOnline: bool = True
     rating: float = 5.0
     tripsCount: int = 0
     intermunicipal: bool = True
@@ -111,7 +112,9 @@ class AuthenticatedUserResponse(BaseModel):
     role: str
     plate: Optional[str] = None
     vehicle: Optional[str] = None
+    vehicleModel: Optional[str] = None
     baseBarrio: Optional[str] = None
+    isOnline: Optional[bool] = None
 
 
 class AuthTokenResponse(BaseModel):
@@ -127,3 +130,12 @@ class UserProfileUpdateRequest(BaseModel):
     vehicleModel: Optional[str] = None
     plate: Optional[str] = None
     baseBarrio: Optional[str] = None
+
+class DriverStatusUpdateRequest(BaseModel):
+    isOnline: bool = Field(..., description="Indica si el conductor esta conectado para recibir solicitudes")
+
+
+class DriverStatusResponse(BaseModel):
+    driverId: int
+    isOnline: bool
+    status: str

@@ -23,6 +23,8 @@ from .schemas import (
     AuthTokenResponse,
     DriverCreate,
     DriverResponse,
+    DriverStatusResponse,
+    DriverStatusUpdateRequest,
     OrderCreate,
     OrderPublicResponse,
     ProposalCreate,
@@ -56,7 +58,7 @@ app.add_middleware(
 
 def format_driver(driver: Driver) -> dict:
     # Adapta las columnas de SQL Server al formato camelCase que consume el frontend
-    return {
+   return {
         "id": driver.id,
         "name": driver.name,
         "phone": driver.phone,
@@ -65,6 +67,7 @@ def format_driver(driver: Driver) -> dict:
         "plate": driver.plate,
         "baseBarrio": driver.base_barrio,
         "status": driver.status,
+        "isOnline": bool(driver.is_online),
         "rating": driver.rating,
         "tripsCount": driver.trips_count,
         "intermunicipal": driver.intermunicipal,
@@ -93,7 +96,7 @@ def format_public_order(order: Order) -> dict:
 def build_user_profile(user: User, db: Session) -> dict:
     # Construye el perfil del usuario y adjunta datos operativos si es conductor
     profile = {
-        "id": user.id,
+     "id": user.id,
         "fullName": user.full_name,
         "phone": user.phone,
         "email": user.email,
@@ -102,6 +105,7 @@ def build_user_profile(user: User, db: Session) -> dict:
         "vehicle": None,
         "vehicleModel": None,
         "baseBarrio": None,
+        "isOnline": None,
     }
 
     if user.role != "driver":
@@ -113,6 +117,7 @@ def build_user_profile(user: User, db: Session) -> dict:
         profile["vehicle"] = driver.vehicle
         profile["vehicleModel"] = driver.vehicle_model
         profile["baseBarrio"] = driver.base_barrio
+        profile["isOnline"] = bool(driver.is_online)
 
     return profile
 
@@ -208,12 +213,7 @@ def root(db: Session = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
     tags=["Autenticacion"],
 )
-@app.post(
-    "/api/auth/register",
-    response_model=AuthTokenResponse,
-    status_code=status.HTTP_201_CREATED,
-    tags=["Autenticacion"],
-)
+
 def register_user(payload: UserRegisterRequest, db: Session = Depends(get_db)):
     if payload.role not in ("client", "driver"):
         raise HTTPException(
@@ -276,6 +276,7 @@ def register_user(payload: UserRegisterRequest, db: Session = Depends(get_db)):
             plate=payload.plate.upper().strip(),
             base_barrio=payload.baseBarrio.strip(),
             status="disponible",
+            is_online=True,
             rating=5.0,
             trips_count=0,
             intermunicipal=is_moto,
@@ -390,6 +391,32 @@ def register_driver(payload: DriverCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_driver)
     return format_driver(new_driver)
+
+@app.patch("/api/drivers/status", response_model=DriverStatusResponse, tags=["Conductores"])
+def update_driver_status(
+    payload: DriverStatusUpdateRequest,
+    current_user: User = Depends(require_role("driver")),
+    db: Session = Depends(get_db),
+):
+    # Busca la ficha operativa vinculada al conductor autenticado mediante JWT
+    driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
+    if not driver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontro una ficha de conductor asociada a esta cuenta.",
+        )
+
+    driver.is_online = payload.isOnline
+    driver.status = "disponible" if payload.isOnline else "fuera_de_servicio"
+
+    db.commit()
+    db.refresh(driver)
+
+    return {
+        "driverId": driver.id,
+        "isOnline": bool(driver.is_online),
+        "status": driver.status,
+    }
 
 
 @app.get("/api/orders", response_model=List[OrderPublicResponse], tags=["Bolsa de Pedidos"])
